@@ -82,16 +82,7 @@ const object = superjson.parse<
 // object === { date: new Date(0) }
 ```
 
-The synchronous `stringify` and `parse` APIs remain available. For asynchronous
-JSON processing, use `asyncStringify` and `asyncParse`:
-
-```js
-const jsonString = await superjson.asyncStringify({ date: new Date(0) });
-const object = await superjson.asyncParse(jsonString);
-```
-
-The asynchronous string APIs use BFJ and are intended for Node.js runtimes. For
-asynchronous processing at the transport boundary, use `asyncSerialize` and
+For asynchronous processing at the transport boundary, use `asyncSerialize` and
 `asyncDeserialize`:
 
 ```js
@@ -100,8 +91,9 @@ const object = await superjson.asyncDeserialize(payload, { yieldRate: 1024 });
 ```
 
 The synchronous `serialize` and `deserialize` APIs remain unchanged. The
-asynchronous APIs process values in order and yield to the event loop after the
-configured number of visited values.
+asynchronous APIs are available in browser and Node.js runtimes and process
+values in order, yielding to the event loop after the configured number of
+visited values.
 
 ## Advanced Usage
 
@@ -230,6 +222,32 @@ Options
   - `inPlace: true` will be much more performant on large objects if it's safe to mutate it
 
 Returns **`your original value`**.
+
+### asyncSerialize
+
+Asynchronously serializes a JavaScript value while periodically yielding to the
+event loop.
+
+```js
+const payload = await asyncSerialize(object, { yieldRate: 1024 });
+```
+
+Options
+
+- `yieldRate: number`
+  - Default: `1024`
+  - Number of visited values between event-loop yields
+
+### asyncDeserialize
+
+Asynchronously deserializes the output of `asyncSerialize`.
+
+```js
+const object = await asyncDeserialize(payload, { yieldRate: 1024 });
+```
+
+It accepts the same `yieldRate` option as `asyncSerialize` and the `inPlace`
+option documented for `deserialize`.
 
 ### stringify
 

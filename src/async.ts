@@ -2,6 +2,10 @@ export interface AsyncOptions {
   yieldRate?: number;
 }
 
+export interface AsyncDeserializeOptions extends AsyncOptions {
+  inPlace?: boolean;
+}
+
 const defaultYieldRate = 1024;
 
 type GlobalWithTimers = typeof globalThis & {

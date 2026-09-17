@@ -58,7 +58,6 @@
     "vitest": "^0.34.6"
   },
   "dependencies": {
-    "bfj": "^7.1.0",
     "copy-anything": "^4"
   }
 }

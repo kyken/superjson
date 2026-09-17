@@ -18,6 +18,7 @@ import {
 import { copy } from 'copy-anything';
 import {
   AsyncOptions,
+  AsyncDeserializeOptions,
   AsyncYieldController,
   copyAsync,
 } from './async.js';
@@ -133,7 +134,7 @@ export default class SuperJSON {
 
   async asyncDeserialize<T = unknown>(
     payload: SuperJSONResult,
-    options?: { inPlace?: boolean; yieldRate?: number }
+    options?: AsyncDeserializeOptions
   ): Promise<T> {
     const { json, meta } = payload;
     const scheduler = new AsyncYieldController(options);
@@ -170,38 +171,6 @@ export default class SuperJSON {
 
   parse<T = unknown>(string: string): T {
     return this.deserialize(JSON.parse(string), { inPlace: true });
-  }
-
-  async asyncStringify(
-    object: SuperJSONValue,
-    options?: AsyncOptions
-  ): Promise<string> {
-    const bfj = await import('bfj');
-    const bfjOptions = options
-      ? { yieldRate: options.yieldRate }
-      : undefined;
-    return bfj.stringify(
-      await this.asyncSerialize(object, options),
-      bfjOptions
-    );
-  }
-
-  async asyncParse<T = unknown>(
-    string: string,
-    options?: AsyncOptions
-  ): Promise<T> {
-    const [bfj, { Readable }] = await Promise.all([
-      import('bfj'),
-      import('node:stream'),
-    ]);
-    const bfjOptions = options
-      ? { yieldRate: options.yieldRate }
-      : undefined;
-    const payload = await bfj.parse(Readable.from([string]), bfjOptions);
-    return this.asyncDeserialize(payload as SuperJSONResult, {
-      inPlace: true,
-      yieldRate: options?.yieldRate,
-    });
   }
 
   readonly classRegistry = new ClassRegistry();
@@ -249,12 +218,6 @@ export default class SuperJSON {
   static parse = SuperJSON.defaultInstance.parse.bind(
     SuperJSON.defaultInstance
   );
-  static asyncStringify = SuperJSON.defaultInstance.asyncStringify.bind(
-    SuperJSON.defaultInstance
-  );
-  static asyncParse = SuperJSON.defaultInstance.asyncParse.bind(
-    SuperJSON.defaultInstance
-  );
   static registerClass = SuperJSON.defaultInstance.registerClass.bind(
     SuperJSON.defaultInstance
   );
@@ -270,6 +233,7 @@ export default class SuperJSON {
 }
 
 export { SuperJSON, SuperJSONResult, SuperJSONValue };
+export type { AsyncDeserializeOptions, AsyncOptions } from './async.js';
 
 export const serialize = SuperJSON.serialize;
 export const deserialize = SuperJSON.deserialize;
@@ -279,9 +243,6 @@ export const asyncDeserialize = SuperJSON.asyncDeserialize;
 
 export const stringify = SuperJSON.stringify;
 export const parse = SuperJSON.parse;
-
-export const asyncStringify = SuperJSON.asyncStringify;
-export const asyncParse = SuperJSON.asyncParse;
 
 export const registerClass = SuperJSON.registerClass;
 export const registerCustom = SuperJSON.registerCustom;

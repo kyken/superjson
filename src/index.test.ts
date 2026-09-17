@@ -5,9 +5,7 @@ import * as fs from 'fs';
 
 import SuperJSON, {
   asyncDeserialize,
-  asyncParse,
   asyncSerialize,
-  asyncStringify,
 } from './index.js';
 import { JSONValue, SuperJSONResult, SuperJSONValue } from './types.js';
 import {
@@ -1024,7 +1022,7 @@ describe('stringify & parse', () => {
   });
 });
 
-describe('async stringify & parse', () => {
+describe('async serialize & deserialize', () => {
   it('preserves low-level serialize and deserialize behavior', async () => {
     const shared = { value: 1 };
     const input = {
@@ -1044,6 +1042,83 @@ describe('async stringify & parse', () => {
     expect(serialized).toEqual(expected);
     expect(deserialized).toEqual(input);
     expect(deserialized.first).toBe(deserialized.second);
+  });
+
+  it('preserves registered and special values', async () => {
+    class User {
+      constructor(public name: string) {}
+    }
+
+    class Money {
+      constructor(public amount: number) {}
+    }
+
+    const instance = new SuperJSON();
+    const symbol = Symbol('registered');
+    const error = new Error('failed');
+    (error as Error & { code?: string }).code = 'E_FAILED';
+    instance.registerClass(User);
+    instance.registerSymbol(symbol, 'registered');
+    instance.registerCustom<Money, number>(
+      {
+        isApplicable: (value): value is Money => value instanceof Money,
+        serialize: value => value.amount,
+        deserialize: value => new Money(value),
+      },
+      'money'
+    );
+    instance.allowErrorProps('code');
+
+    const input = {
+      date: new Date(0),
+      regexp: /superjson/gi,
+      bigint: BigInt(42),
+      symbol,
+      typed: new Float64Array([NaN, Infinity, -Infinity]),
+      user: new User('Ada'),
+      money: new Money(100),
+      error,
+    };
+
+    const serialized = await instance.asyncSerialize(input, {
+      yieldRate: 1,
+    });
+    const restored = await instance.asyncDeserialize<typeof input>(serialized, {
+      yieldRate: 1,
+    });
+
+    expect(serialized).toEqual(instance.serialize(input));
+    expect(restored.date).toEqual(input.date);
+    expect(restored.regexp).toEqual(input.regexp);
+    expect(restored.bigint).toBe(input.bigint);
+    expect(restored.symbol).toBe(symbol);
+    expect(restored.typed).toBeInstanceOf(Float64Array);
+    expect(Number.isNaN(restored.typed[0])).toBe(true);
+    expect(restored.typed[1]).toBe(Infinity);
+    expect(restored.typed[2]).toBe(-Infinity);
+    expect(restored.user).toBeInstanceOf(User);
+    expect(restored.user.name).toBe('Ada');
+    expect(restored.money).toBeInstanceOf(Money);
+    expect(restored.money.amount).toBe(100);
+    expect(restored.error).toBeInstanceOf(Error);
+    expect((restored.error as Error & { code?: string }).code).toBe('E_FAILED');
+  });
+
+  it('restores deduped references asynchronously', async () => {
+    const instance = new SuperJSON({ dedupe: true });
+    const shared = { value: 1 };
+    const input = { first: shared, second: shared };
+
+    const serialized = await instance.asyncSerialize(input, { yieldRate: 1 });
+    const restored = await instance.asyncDeserialize<typeof input>(serialized, {
+      yieldRate: 1,
+    });
+
+    expect(serialized.json).toEqual({
+      first: { value: 1 },
+      second: null,
+    });
+    expect(restored.first).toBe(restored.second);
   });
 
   it('preserves collection references and circular references', async () => {
@@ -1081,6 +1156,25 @@ describe('async stringify & parse', () => {
 
     expect(deserialized).toBe(serialized.json);
     expect((deserialized as { date: Date }).date).toEqual(new Date(0));
+  });
+
+  it('does not mutate the payload when deserializing out of place', async () => {
+    const serialized = await asyncSerialize({ date: new Date(0) });
+    const deserialized = await asyncDeserialize<{ date: Date }>(serialized);
+
+    expect(deserialized).not.toBe(serialized.json);
+    expect((serialized.json as { date: string }).date).toBe(
+      '1970-01-01T00:00:00.000Z'
+    );
+  });
+
+  it('rejects invalid yield rates', async () => {
+    await expect(
+      SuperJSON.asyncSerialize({}, { yieldRate: 0 })
+    ).rejects.toThrow('yieldRate');
+    await expect(
+      SuperJSON.asyncDeserialize({ json: {} }, { yieldRate: NaN })
+    ).rejects.toThrow('yieldRate');
   });
 
   it('yields to the event loop during serialization and deserialization', async () => {
@@ -1121,63 +1215,41 @@ describe('async stringify & parse', () => {
     await deserialization;
   });
 
-  it('preserves SuperJSON transformations', async () => {
-    const input = {
-      date: new Date(0),
-      set: new Set([1, 2]),
-      missing: undefined,
-    };
-
-    const stringified = await SuperJSON.asyncStringify(input);
-    const parsed = await SuperJSON.asyncParse<typeof input>(stringified);
-
-    expect(JSON.parse(stringified)).toEqual({
-      json: {
-        date: '1970-01-01T00:00:00.000Z',
-        set: [1, 2],
-        missing: null,
-      },
-      meta: {
-        values: {
-          date: ['Date'],
-          set: ['set'],
-          missing: ['undefined'],
-        },
-        v: 1,
-      },
+  it('yields while traversing primitive-heavy arrays', async () => {
+    const input = Array.from({ length: 100 }, (_, index) => index);
+    let done = false;
+    const serialization = SuperJSON.asyncSerialize(input, { yieldRate: 1 });
+    serialization.finally(() => {
+      done = true;
     });
-    expect(parsed.date).toEqual(input.date);
-    expect(parsed.set).toEqual(input.set);
-    expect(parsed.missing).toBeUndefined();
+
+    await new Promise<void>(resolve => setImmediate(resolve));
+    expect(done).toBe(false);
+    await serialization;
   });
 
-  it('exposes named asynchronous APIs', async () => {
-    const stringified = await asyncStringify({ value: 1 });
+  it.each([
+    ['__proto__', '__proto__.x'],
+    ['prototype', 'prototype.x'],
+    ['constructor', 'constructor.prototype.x'],
+  ])(
+    'rejects prototype pollution through asynchronous APIs: %s',
+    async (forbidden, path) => {
+      await expect(
+        SuperJSON.asyncSerialize({ [forbidden]: 1 } as any)
+      ).rejects.toThrow(/prototype pollution risk/);
 
-    await expect(asyncParse(stringified)).resolves.toEqual({ value: 1 });
-  });
-
-  it('rejects invalid JSON', async () => {
-    await expect(SuperJSON.asyncParse('{')).rejects.toThrow();
-  });
-
-  it('rejects prototype pollution through asynchronous APIs', async () => {
-    await expect(
-      SuperJSON.asyncSerialize({ ['__proto__']: 1 } as any)
-    ).rejects.toThrow(/prototype pollution risk/);
-
-    const payload: SuperJSONResult = {
-      json: { myValue: 1337 },
-      meta: {
-        referentialEqualities: {
-          myValue: ['__proto__.x'],
+      const payload: SuperJSONResult = {
+        json: { myValue: 1337 },
+        meta: {
+          referentialEqualities: {
+            myValue: [path],
+          },
         },
-      },
-    };
-    await expect(SuperJSON.asyncDeserialize(payload)).rejects.toThrow(
-      '__proto__ is not allowed as a property'
-    );
-  });
+      };
+      await expect(SuperJSON.asyncDeserialize(payload)).rejects.toThrow();
+    }
+  );
 });
 
 describe('allowErrorProps(...) (#91)', () => {
