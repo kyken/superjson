@@ -7,11 +7,20 @@ import {
 } from './custom-transformer-registry.js';
 import {
   applyReferentialEqualityAnnotations,
+  applyReferentialEqualityAnnotationsAsync,
   applyValueAnnotations,
+  applyValueAnnotationsAsync,
+  asyncWalker,
   generateReferentialEqualityAnnotations,
+  generateReferentialEqualityAnnotationsAsync,
   walker,
 } from './plainer.js';
 import { copy } from 'copy-anything';
+import {
+  AsyncOptions,
+  AsyncYieldController,
+  copyAsync,
+} from './async.js';
 
 export default class SuperJSON {
   /**
@@ -80,12 +89,119 @@ export default class SuperJSON {
     return result;
   }
 
+  async asyncSerialize(
+    object: SuperJSONValue,
+    options?: AsyncOptions
+  ): Promise<SuperJSONResult> {
+    const scheduler = new AsyncYieldController(options);
+    const identities = new Map<any, any[][]>();
+    const output = await asyncWalker(
+      object,
+      identities,
+      this,
+      this.dedupe,
+      scheduler
+    );
+    const res: SuperJSONResult = {
+      json: output.transformedValue,
+    };
+
+    if (output.annotations) {
+      res.meta = {
+        ...res.meta,
+        values: output.annotations,
+      };
+    }
+
+    const equalityAnnotations =
+      await generateReferentialEqualityAnnotationsAsync(
+        identities,
+        this.dedupe,
+        scheduler
+      );
+    if (equalityAnnotations) {
+      res.meta = {
+        ...res.meta,
+        referentialEqualities: equalityAnnotations,
+      };
+    }
+
+    if (res.meta) res.meta.v = 1;
+
+    return res;
+  }
+
+  async asyncDeserialize<T = unknown>(
+    payload: SuperJSONResult,
+    options?: { inPlace?: boolean; yieldRate?: number }
+  ): Promise<T> {
+    const { json, meta } = payload;
+    const scheduler = new AsyncYieldController(options);
+
+    let result: T = options?.inPlace
+      ? json
+      : ((await copyAsync(json, scheduler)) as any);
+
+    if (meta?.values) {
+      result = await applyValueAnnotationsAsync(
+        result,
+        meta.values,
+        meta.v ?? 0,
+        this,
+        scheduler
+      );
+    }
+
+    if (meta?.referentialEqualities) {
+      result = await applyReferentialEqualityAnnotationsAsync(
+        result,
+        meta.referentialEqualities,
+        meta.v ?? 0,
+        scheduler
+      );
+    }
+
+    return result;
+  }
+
   stringify(object: SuperJSONValue): string {
     return JSON.stringify(this.serialize(object));
   }
 
   parse<T = unknown>(string: string): T {
     return this.deserialize(JSON.parse(string), { inPlace: true });
+  }
+
+  async asyncStringify(
+    object: SuperJSONValue,
+    options?: AsyncOptions
+  ): Promise<string> {
+    const bfj = await import('bfj');
+    const bfjOptions = options
+      ? { yieldRate: options.yieldRate }
+      : undefined;
+    return bfj.stringify(
+      await this.asyncSerialize(object, options),
+      bfjOptions
+    );
+  }
+
+  async asyncParse<T = unknown>(
+    string: string,
+    options?: AsyncOptions
+  ): Promise<T> {
+    const [bfj, { Readable }] = await Promise.all([
+      import('bfj'),
+      import('node:stream'),
+    ]);
+    const bfjOptions = options
+      ? { yieldRate: options.yieldRate }
+      : undefined;
+    const payload = await bfj.parse(Readable.from([string]), bfjOptions);
+    return this.asyncDeserialize(payload as SuperJSONResult, {
+      inPlace: true,
+      yieldRate: options?.yieldRate,
+    });
   }
 
   readonly classRegistry = new ClassRegistry();
@@ -121,10 +237,22 @@ export default class SuperJSON {
   static deserialize = SuperJSON.defaultInstance.deserialize.bind(
     SuperJSON.defaultInstance
   );
+  static asyncSerialize = SuperJSON.defaultInstance.asyncSerialize.bind(
+    SuperJSON.defaultInstance
+  );
+  static asyncDeserialize = SuperJSON.defaultInstance.asyncDeserialize.bind(
+    SuperJSON.defaultInstance
+  );
   static stringify = SuperJSON.defaultInstance.stringify.bind(
     SuperJSON.defaultInstance
   );
   static parse = SuperJSON.defaultInstance.parse.bind(
+    SuperJSON.defaultInstance
+  );
+  static asyncStringify = SuperJSON.defaultInstance.asyncStringify.bind(
+    SuperJSON.defaultInstance
+  );
+  static asyncParse = SuperJSON.defaultInstance.asyncParse.bind(
     SuperJSON.defaultInstance
   );
   static registerClass = SuperJSON.defaultInstance.registerClass.bind(
@@ -146,8 +274,14 @@ export { SuperJSON, SuperJSONResult, SuperJSONValue };
 export const serialize = SuperJSON.serialize;
 export const deserialize = SuperJSON.deserialize;
 
+export const asyncSerialize = SuperJSON.asyncSerialize;
+export const asyncDeserialize = SuperJSON.asyncDeserialize;
+
 export const stringify = SuperJSON.stringify;
 export const parse = SuperJSON.parse;
+
+export const asyncStringify = SuperJSON.asyncStringify;
+export const asyncParse = SuperJSON.asyncParse;
 
 export const registerClass = SuperJSON.registerClass;
 export const registerCustom = SuperJSON.registerCustom;

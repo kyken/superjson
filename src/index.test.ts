@@ -3,7 +3,12 @@
 
 import * as fs from 'fs';
 
-import SuperJSON from './index.js';
+import SuperJSON, {
+  asyncDeserialize,
+  asyncParse,
+  asyncSerialize,
+  asyncStringify,
+} from './index.js';
 import { JSONValue, SuperJSONResult, SuperJSONValue } from './types.js';
 import {
   isArray,
@@ -1016,6 +1021,162 @@ describe('stringify & parse', () => {
 
     expect(error).toBeInstanceOf(CustomError);
     expect(error.customProperty).toEqual(10);
+  });
+});
+
+describe('async stringify & parse', () => {
+  it('preserves low-level serialize and deserialize behavior', async () => {
+    const shared = { value: 1 };
+    const input = {
+      date: new Date(0),
+      set: new Set([shared]),
+      first: shared,
+      second: shared,
+      missing: undefined,
+    };
+
+    const expected = SuperJSON.serialize(input);
+    const serialized = await SuperJSON.asyncSerialize(input);
+    const deserialized = await SuperJSON.asyncDeserialize<typeof input>(
+      serialized
+    );
+
+    expect(serialized).toEqual(expected);
+    expect(deserialized).toEqual(input);
+    expect(deserialized.first).toBe(deserialized.second);
+  });
+
+  it('preserves collection references and circular references', async () => {
+    const shared = { value: 1 };
+    const input = {
+      map: new Map([['shared', shared]]),
+      set: new Set([shared]),
+    };
+    const expected = SuperJSON.serialize(input);
+    const serialized = await SuperJSON.asyncSerialize(input);
+    const deserialized = await SuperJSON.asyncDeserialize<typeof input>(
+      serialized
+    );
+
+    expect(serialized).toEqual(expected);
+    expect(deserialized.map.get('shared')).toBe(
+      [...deserialized.set][0]
+    );
+
+    const circular: { self?: unknown } = {};
+    circular.self = circular;
+    const circularSerialized = await SuperJSON.asyncSerialize({ circular });
+    const circularDeserialized = await SuperJSON.asyncDeserialize<{
+      circular: { self?: unknown };
+    }>(circularSerialized);
+
+    expect(circularDeserialized.circular.self).toBe(
+      circularDeserialized.circular
+    );
+  });
+
+  it('supports in-place asynchronous deserialization', async () => {
+    const serialized = await asyncSerialize({ date: new Date(0) });
+    const deserialized = await asyncDeserialize(serialized, { inPlace: true });
+
+    expect(deserialized).toBe(serialized.json);
+    expect((deserialized as { date: Date }).date).toEqual(new Date(0));
+  });
+
+  it('yields to the event loop during serialization and deserialization', async () => {
+    const input = Object.fromEntries(
+      Array.from({ length: 100 }, (_, index) => [`value${index}`, index])
+    );
+
+    let serializationDone = false;
+    const serialization = SuperJSON.asyncSerialize(input, { yieldRate: 1 });
+    serialization.then(
+      () => {
+        serializationDone = true;
+      },
+      () => {
+        serializationDone = true;
+      }
+    );
+
+    await new Promise<void>(resolve => setImmediate(resolve));
+    expect(serializationDone).toBe(false);
+
+    const serialized = await serialization;
+    let deserializationDone = false;
+    const deserialization = SuperJSON.asyncDeserialize(serialized, {
+      yieldRate: 1,
+    });
+    deserialization.then(
+      () => {
+        deserializationDone = true;
+      },
+      () => {
+        deserializationDone = true;
+      }
+    );
+
+    await new Promise<void>(resolve => setImmediate(resolve));
+    expect(deserializationDone).toBe(false);
+    await deserialization;
+  });
+
+  it('preserves SuperJSON transformations', async () => {
+    const input = {
+      date: new Date(0),
+      set: new Set([1, 2]),
+      missing: undefined,
+    };
+
+    const stringified = await SuperJSON.asyncStringify(input);
+    const parsed = await SuperJSON.asyncParse<typeof input>(stringified);
+
+    expect(JSON.parse(stringified)).toEqual({
+      json: {
+        date: '1970-01-01T00:00:00.000Z',
+        set: [1, 2],
+        missing: null,
+      },
+      meta: {
+        values: {
+          date: ['Date'],
+          set: ['set'],
+          missing: ['undefined'],
+        },
+        v: 1,
+      },
+    });
+    expect(parsed.date).toEqual(input.date);
+    expect(parsed.set).toEqual(input.set);
+    expect(parsed.missing).toBeUndefined();
+  });
+
+  it('exposes named asynchronous APIs', async () => {
+    const stringified = await asyncStringify({ value: 1 });
+
+    await expect(asyncParse(stringified)).resolves.toEqual({ value: 1 });
+  });
+
+  it('rejects invalid JSON', async () => {
+    await expect(SuperJSON.asyncParse('{')).rejects.toThrow();
+  });
+
+  it('rejects prototype pollution through asynchronous APIs', async () => {
+    await expect(
+      SuperJSON.asyncSerialize({ ['__proto__']: 1 } as any)
+    ).rejects.toThrow(/prototype pollution risk/);
+
+    const payload: SuperJSONResult = {
+      json: { myValue: 1337 },
+      meta: {
+        referentialEqualities: {
+          myValue: ['__proto__.x'],
+        },
+      },
+    };
+    await expect(SuperJSON.asyncDeserialize(payload)).rejects.toThrow(
+      '__proto__ is not allowed as a property'
+    );
   });
 });
 

@@ -1,5 +1,6 @@
 import { isMap, isArray, isPlainObject, isSet } from './is.js';
 import { includes } from './util.js';
+import { AsyncYieldController } from './async.js';
 
 const getNthKey = (value: Map<any, any> | Set<any>, n: number): any => {
   if (n > value.size) throw new Error('index out of bounds');
@@ -117,6 +118,147 @@ export const setDeep = (
   if (isMap(parent)) {
     const row = +path[path.length - 2];
     const keyToRow = getNthKey(parent, row);
+
+    const type = +lastKey === 0 ? 'key' : 'value';
+    switch (type) {
+      case 'key': {
+        const newKey = mapper(keyToRow);
+        parent.set(newKey, parent.get(keyToRow));
+
+        if (newKey !== keyToRow) {
+          parent.delete(keyToRow);
+        }
+        break;
+      }
+
+      case 'value': {
+        parent.set(keyToRow, mapper(parent.get(keyToRow)));
+        break;
+      }
+    }
+  }
+
+  return object;
+};
+
+const getNthKeyAsync = async (
+  value: Map<any, any> | Set<any>,
+  n: number,
+  scheduler: AsyncYieldController
+): Promise<any> => {
+  if (n > value.size) throw new Error('index out of bounds');
+  const keys = value.keys();
+  while (n > 0) {
+    await scheduler.tick();
+    keys.next();
+    n--;
+  }
+
+  await scheduler.tick();
+  return keys.next().value;
+};
+
+export const getDeepAsync = async (
+  object: object,
+  path: (string | number)[],
+  scheduler: AsyncYieldController
+): Promise<object> => {
+  validatePath(path);
+
+  for (let i = 0; i < path.length; i++) {
+    await scheduler.tick();
+    const key = path[i];
+    if (isSet(object)) {
+      object = await getNthKeyAsync(object, +key, scheduler);
+    } else if (isMap(object)) {
+      const row = +key;
+      const type = +path[++i] === 0 ? 'key' : 'value';
+
+      const keyOfRow = await getNthKeyAsync(object, row, scheduler);
+      switch (type) {
+        case 'key':
+          object = keyOfRow;
+          break;
+        case 'value':
+          object = object.get(keyOfRow);
+          break;
+      }
+    } else {
+      object = (object as any)[key];
+    }
+  }
+
+  return object;
+};
+
+export const setDeepAsync = async (
+  object: any,
+  path: (string | number)[],
+  mapper: (v: any) => any,
+  scheduler: AsyncYieldController
+): Promise<any> => {
+  validatePath(path);
+
+  if (path.length === 0) {
+    return mapper(object);
+  }
+
+  let parent = object;
+
+  for (let i = 0; i < path.length - 1; i++) {
+    await scheduler.tick();
+    const key = path[i];
+
+    if (isArray(parent)) {
+      const index = +key;
+      parent = parent[index];
+    } else if (isPlainObject(parent)) {
+      parent = parent[key];
+    } else if (isSet(parent)) {
+      const row = +key;
+      parent = await getNthKeyAsync(parent, row, scheduler);
+    } else if (isMap(parent)) {
+      const isEnd = i === path.length - 2;
+      if (isEnd) {
+        break;
+      }
+
+      const row = +key;
+      const type = +path[++i] === 0 ? 'key' : 'value';
+
+      const keyOfRow = await getNthKeyAsync(parent, row, scheduler);
+      switch (type) {
+        case 'key':
+          parent = keyOfRow;
+          break;
+        case 'value':
+          parent = parent.get(keyOfRow);
+          break;
+      }
+    }
+  }
+
+  await scheduler.tick();
+  const lastKey = path[path.length - 1];
+
+  if (isArray(parent)) {
+    parent[+lastKey] = mapper(parent[+lastKey]);
+  } else if (isPlainObject(parent)) {
+    parent[lastKey] = mapper(parent[lastKey]);
+  }
+
+  if (isSet(parent)) {
+    const oldValue = await getNthKeyAsync(parent, +lastKey, scheduler);
+    const newValue = mapper(oldValue);
+    if (oldValue !== newValue) {
+      parent.delete(oldValue);
+      parent.add(newValue);
+    }
+  }
+
+  if (isMap(parent)) {
+    const row = +path[path.length - 2];
+    const keyToRow = await getNthKeyAsync(parent, row, scheduler);
 
     const type = +lastKey === 0 ? 'key' : 'value';
     switch (type) {
