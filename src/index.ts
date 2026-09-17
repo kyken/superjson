@@ -90,7 +90,7 @@ export default class SuperJSON {
     return result;
   }
 
-  async asyncSerialize(
+  async serializeAsync(
     object: SuperJSONValue,
     options?: AsyncOptions
   ): Promise<SuperJSONResult> {
@@ -132,7 +132,7 @@ export default class SuperJSON {
     return res;
   }
 
-  async asyncDeserialize<T = unknown>(
+  async deserializeAsync<T = unknown>(
     payload: SuperJSONResult,
     options?: AsyncDeserializeOptions
   ): Promise<T> {
@@ -206,10 +206,10 @@ export default class SuperJSON {
   static deserialize = SuperJSON.defaultInstance.deserialize.bind(
     SuperJSON.defaultInstance
   );
-  static asyncSerialize = SuperJSON.defaultInstance.asyncSerialize.bind(
+  static serializeAsync = SuperJSON.defaultInstance.serializeAsync.bind(
     SuperJSON.defaultInstance
   );
-  static asyncDeserialize = SuperJSON.defaultInstance.asyncDeserialize.bind(
+  static deserializeAsync = SuperJSON.defaultInstance.deserializeAsync.bind(
     SuperJSON.defaultInstance
   );
   static stringify = SuperJSON.defaultInstance.stringify.bind(
@@ -238,8 +238,8 @@ export type { AsyncDeserializeOptions, AsyncOptions } from './async.js';
 export const serialize = SuperJSON.serialize;
 export const deserialize = SuperJSON.deserialize;
 
-export const asyncSerialize = SuperJSON.asyncSerialize;
-export const asyncDeserialize = SuperJSON.asyncDeserialize;
+export const serializeAsync = SuperJSON.serializeAsync;
+export const deserializeAsync = SuperJSON.deserializeAsync;
 
 export const stringify = SuperJSON.stringify;
 export const parse = SuperJSON.parse;

@@ -82,12 +82,12 @@ const object = superjson.parse<
 // object === { date: new Date(0) }
 ```
 
-For asynchronous processing at the transport boundary, use `asyncSerialize` and
-`asyncDeserialize`:
+For asynchronous processing at the transport boundary, use
+`serializeAsync` and `deserializeAsync`:
 
 ```js
-const payload = await superjson.asyncSerialize(value, { yieldRate: 1024 });
-const object = await superjson.asyncDeserialize(payload, { yieldRate: 1024 });
+const payload = await superjson.serializeAsync(value, { yieldRate: 1024 });
+const object = await superjson.deserializeAsync(payload, { yieldRate: 1024 });
 ```
 
 The synchronous `serialize` and `deserialize` APIs remain unchanged. The
@@ -223,13 +223,13 @@ Options
 
 Returns **`your original value`**.
 
-### asyncSerialize
+### serializeAsync
 
 Asynchronously serializes a JavaScript value while periodically yielding to the
 event loop.
 
 ```js
-const payload = await asyncSerialize(object, { yieldRate: 1024 });
+const payload = await serializeAsync(object, { yieldRate: 1024 });
 ```
 
 Options
@@ -238,15 +238,15 @@ Options
   - Default: `1024`
   - Number of visited values between event-loop yields
 
-### asyncDeserialize
+### deserializeAsync
 
-Asynchronously deserializes the output of `asyncSerialize`.
+Asynchronously deserializes the output of `serializeAsync`.
 
 ```js
-const object = await asyncDeserialize(payload, { yieldRate: 1024 });
+const object = await deserializeAsync(payload, { yieldRate: 1024 });
 ```
 
-It accepts the same `yieldRate` option as `asyncSerialize` and the `inPlace`
+It accepts the same `yieldRate` option as `serializeAsync` and the `inPlace`
 option documented for `deserialize`.
 
 ### stringify

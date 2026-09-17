@@ -4,8 +4,8 @@
 import * as fs from 'fs';
 
 import SuperJSON, {
-  asyncDeserialize,
-  asyncSerialize,
+  deserializeAsync,
+  serializeAsync,
 } from './index.js';
 import { JSONValue, SuperJSONResult, SuperJSONValue } from './types.js';
 import {
@@ -1023,6 +1023,16 @@ describe('stringify & parse', () => {
 });
 
 describe('async serialize & deserialize', () => {
+  it('exposes suffix-named async transformer methods', async () => {
+    const input = { date: new Date(0) };
+    const serialized = await SuperJSON.serializeAsync(input);
+
+    expect(serialized).toEqual(await SuperJSON.serializeAsync(input));
+    expect(await SuperJSON.deserializeAsync(serialized)).toEqual(input);
+    expect(await serializeAsync(input)).toEqual(serialized);
+    expect(await deserializeAsync(serialized)).toEqual(input);
+  });
+
   it('preserves low-level serialize and deserialize behavior', async () => {
     const shared = { value: 1 };
     const input = {
@@ -1034,8 +1044,8 @@ describe('async serialize & deserialize', () => {
     };
 
     const expected = SuperJSON.serialize(input);
-    const serialized = await SuperJSON.asyncSerialize(input);
-    const deserialized = await SuperJSON.asyncDeserialize<typeof input>(
+    const serialized = await SuperJSON.serializeAsync(input);
+    const deserialized = await SuperJSON.deserializeAsync<typeof input>(
       serialized
     );
 
@@ -1080,10 +1090,10 @@ describe('async serialize & deserialize', () => {
       error,
     };
 
-    const serialized = await instance.asyncSerialize(input, {
+    const serialized = await instance.serializeAsync(input, {
       yieldRate: 1,
     });
-    const restored = await instance.asyncDeserialize<typeof input>(serialized, {
+    const restored = await instance.deserializeAsync<typeof input>(serialized, {
       yieldRate: 1,
     });
 
@@ -1109,8 +1119,8 @@ describe('async serialize & deserialize', () => {
     const shared = { value: 1 };
     const input = { first: shared, second: shared };
 
-    const serialized = await instance.asyncSerialize(input, { yieldRate: 1 });
-    const restored = await instance.asyncDeserialize<typeof input>(serialized, {
+    const serialized = await instance.serializeAsync(input, { yieldRate: 1 });
+    const restored = await instance.deserializeAsync<typeof input>(serialized, {
       yieldRate: 1,
     });
 
@@ -1128,8 +1138,8 @@ describe('async serialize & deserialize', () => {
       set: new Set([shared]),
     };
     const expected = SuperJSON.serialize(input);
-    const serialized = await SuperJSON.asyncSerialize(input);
-    const deserialized = await SuperJSON.asyncDeserialize<typeof input>(
+    const serialized = await SuperJSON.serializeAsync(input);
+    const deserialized = await SuperJSON.deserializeAsync<typeof input>(
       serialized
     );
 
@@ -1140,8 +1150,8 @@ describe('async serialize & deserialize', () => {
 
     const circular: { self?: unknown } = {};
     circular.self = circular;
-    const circularSerialized = await SuperJSON.asyncSerialize({ circular });
-    const circularDeserialized = await SuperJSON.asyncDeserialize<{
+    const circularSerialized = await SuperJSON.serializeAsync({ circular });
+    const circularDeserialized = await SuperJSON.deserializeAsync<{
       circular: { self?: unknown };
     }>(circularSerialized);
 
@@ -1151,16 +1161,16 @@ describe('async serialize & deserialize', () => {
   });
 
   it('supports in-place asynchronous deserialization', async () => {
-    const serialized = await asyncSerialize({ date: new Date(0) });
-    const deserialized = await asyncDeserialize(serialized, { inPlace: true });
+    const serialized = await serializeAsync({ date: new Date(0) });
+    const deserialized = await deserializeAsync(serialized, { inPlace: true });
 
     expect(deserialized).toBe(serialized.json);
     expect((deserialized as { date: Date }).date).toEqual(new Date(0));
   });
 
   it('does not mutate the payload when deserializing out of place', async () => {
-    const serialized = await asyncSerialize({ date: new Date(0) });
-    const deserialized = await asyncDeserialize<{ date: Date }>(serialized);
+    const serialized = await serializeAsync({ date: new Date(0) });
+    const deserialized = await deserializeAsync<{ date: Date }>(serialized);
 
     expect(deserialized).not.toBe(serialized.json);
     expect((serialized.json as { date: string }).date).toBe(
@@ -1170,10 +1180,10 @@ describe('async serialize & deserialize', () => {
 
   it('rejects invalid yield rates', async () => {
     await expect(
-      SuperJSON.asyncSerialize({}, { yieldRate: 0 })
+      SuperJSON.serializeAsync({}, { yieldRate: 0 })
     ).rejects.toThrow('yieldRate');
     await expect(
-      SuperJSON.asyncDeserialize({ json: {} }, { yieldRate: NaN })
+      SuperJSON.deserializeAsync({ json: {} }, { yieldRate: NaN })
     ).rejects.toThrow('yieldRate');
   });
 
@@ -1183,7 +1193,7 @@ describe('async serialize & deserialize', () => {
     );
 
     let serializationDone = false;
-    const serialization = SuperJSON.asyncSerialize(input, { yieldRate: 1 });
+    const serialization = SuperJSON.serializeAsync(input, { yieldRate: 1 });
     serialization.then(
       () => {
         serializationDone = true;
@@ -1198,7 +1208,7 @@ describe('async serialize & deserialize', () => {
 
     const serialized = await serialization;
     let deserializationDone = false;
-    const deserialization = SuperJSON.asyncDeserialize(serialized, {
+    const deserialization = SuperJSON.deserializeAsync(serialized, {
       yieldRate: 1,
     });
     deserialization.then(
@@ -1218,7 +1228,7 @@ describe('async serialize & deserialize', () => {
   it('yields while traversing primitive-heavy arrays', async () => {
     const input = Array.from({ length: 100 }, (_, index) => index);
     let done = false;
-    const serialization = SuperJSON.asyncSerialize(input, { yieldRate: 1 });
+    const serialization = SuperJSON.serializeAsync(input, { yieldRate: 1 });
     serialization.finally(() => {
       done = true;
     });
@@ -1236,7 +1246,7 @@ describe('async serialize & deserialize', () => {
     'rejects prototype pollution through asynchronous APIs: %s',
     async (forbidden, path) => {
       await expect(
-        SuperJSON.asyncSerialize({ [forbidden]: 1 } as any)
+        SuperJSON.serializeAsync({ [forbidden]: 1 } as any)
       ).rejects.toThrow(/prototype pollution risk/);
 
       const payload: SuperJSONResult = {
@@ -1247,7 +1257,7 @@ describe('async serialize & deserialize', () => {
           },
         },
       };
-      await expect(SuperJSON.asyncDeserialize(payload)).rejects.toThrow();
+      await expect(SuperJSON.deserializeAsync(payload)).rejects.toThrow();
     }
   );
 });
